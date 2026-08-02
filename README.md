@@ -6,4 +6,5 @@ This mod was made by ai (Claude sonnet 5) using the dll from https://thunderstor
 
 ## Q&A
 Q: Why is this mod Ai generated? A: I was too lazy and had another, more important, project I had to work on. I can code in c tho.<br>
-Q: Can this mod be used on quest A: No
+Q: Can this mod be used on quest A: No<br>
+Q: How do I compile the mod A: open the folder with both files in terminal, run `$env:BONELAB_DIR = "PathToFolderContaningYourModsFolder"` and then run `dotnet build -c Release` in to compile in into your mods folder
