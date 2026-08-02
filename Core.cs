@@ -14,7 +14,7 @@ using Avatar = Il2CppSLZ.VRMK.Avatar;
 
 namespace OffsetRemover
 {
-    sealed class BonePair { public Transform src; public Transform dst; public bool isHeadSubtree; public bool isPathMatched; public Vector3 headRestLocal; }
+    sealed class BonePair { public Transform src; public Transform dst; public bool isHeadSubtree; public Vector3 headRestLocal; }
     sealed class RendererPair { public Renderer src; public Renderer dst; public bool forceDisable; }
 
     public class Core : MelonMod
@@ -68,7 +68,7 @@ namespace OffsetRemover
 
         public override void OnInitializeMelon()
         {
-            MelonLogger.Msg("Offset Remover Loaded");
+            MelonLogger.Msg("[OffsetRemover] Community Patch loaded.");
             RenderPipelineManager.beginCameraRendering += (Action<ScriptableRenderContext, Camera>)OnBeginCameraRendering;
             Hooking.OnSwitchAvatarPostfix += avatar =>
             {
@@ -172,11 +172,6 @@ namespace OffsetRemover
                         d.localPosition = p.headRestLocal;
                         d.localRotation = s.localRotation;
                     }
-                    else if (p.isPathMatched)
-                    {
-                        d.localPosition = s.localPosition;
-                        d.localRotation = s.localRotation;
-                    }
                     else
                     {
                         d.SetPositionAndRotation(s.position, s.rotation);
@@ -189,7 +184,8 @@ namespace OffsetRemover
                     var r = rpArr[i];
                     var s = r.src; var d = r.dst;
                     if (s == null || d == null) continue;
-                    d.enabled = s.enabled && s.gameObject.activeInHierarchy;
+                    if (r.forceDisable) d.forceRenderingOff = true;
+                    else { d.forceRenderingOff = false; d.enabled = s.enabled && s.gameObject.activeInHierarchy; }
                 }
 
                 if (hasHeadCorrection && headBoneOnSource == null && headBoneOnClone != null)
@@ -206,6 +202,8 @@ namespace OffsetRemover
                 ResetCloneState();
             }
         }
+
+        private static readonly System.Collections.Generic.HashSet<string> ExcludedBoneNames = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         public static void ForceRebuild()
         {
@@ -297,13 +295,8 @@ namespace OffsetRemover
             cloneBuiltForAvatarId = manager.avatar.GetInstanceID();
             buildInProgress = false;
 
-            int fastPathBones = 0;
-            for (int i = 0; i < bonePairCount; ++i) if (bonePairsArr[i].isPathMatched || bonePairsArr[i].isHeadSubtree) fastPathBones++;
-
             ApplyVisibilityToAllCameras();
-            MelonLogger.Msg($"[OffsetRemover] Clone built -- bonePairs={bonePairCount} ({fastPathBones} fast/local, " +
-                             $"{bonePairCount - fastPathBones} world-space fallback), renderers={cloneAvatarRenderers.Count}, " +
-                             $"headCorrection={(hasHeadCorrection ? "yes" : "no")}");
+            MelonLogger.Msg($"[OffsetRemover] Clone built -- bonePairs={bonePairCount}, renderers={cloneAvatarRenderers.Count}, headCorrection={(hasHeadCorrection ? "yes" : "no")}");
         }
 
         private static void BuildPairings(Animator srcAnim, Animator clnAnim, GameObject srcRoot, GameObject clnRoot)
@@ -373,7 +366,7 @@ namespace OffsetRemover
             {
                 if (clnPathMap.TryGetValue(kv.Key, out var clnT))
                 {
-                    var bp = new BonePair { src = kv.Value, dst = clnT, isHeadSubtree = IsInHeadSubtreeCached(clnT), isPathMatched = true };
+                    var bp = new BonePair { src = kv.Value, dst = clnT, isHeadSubtree = IsInHeadSubtreeCached(clnT) };
                     if (bp.isHeadSubtree && headSubtreeLocalPositions.TryGetValue(clnT.name, out var restLocal)) bp.headRestLocal = restLocal;
                     bonePairsArr[bonePairCount++] = bp;
                     matchedCloneTransforms.Add(clnT);
@@ -429,19 +422,8 @@ namespace OffsetRemover
                 if (chosen == null) continue;
 
                 try { chosen.sharedMaterials = s.sharedMaterials; } catch { }
-
-                bool forceDisable = s.sharedMaterial != null && s.sharedMaterial.shader != null && s.sharedMaterial.shader.name == "SLZ/Icon Billboard";
-
-                if (forceDisable)
-                {
-                    try { chosen.forceRenderingOff = true; } catch { }
-                    cloneAvatarRenderers.Remove(chosen);
-                }
-                else
-                {
-                    var rp = new RendererPair { src = s, dst = chosen, forceDisable = false };
-                    rendererPairsArr[rendererPairCount++] = rp;
-                }
+                var rp = new RendererPair { src = s, dst = chosen, forceDisable = (s.sharedMaterial != null && s.sharedMaterial.shader != null && s.sharedMaterial.shader.name == "SLZ/Icon Billboard") };
+                rendererPairsArr[rendererPairCount++] = rp;
                 matchedClnR.Add(chosen);
             }
         }
@@ -526,7 +508,6 @@ namespace OffsetRemover
             rendererPairCount = 0;
             selfRenderers.Clear();
             cloneAvatarRenderers.Clear();
-            lastAppliedShowSelf = null;
         }
 
         private static void CleanClone(GameObject clone)
@@ -572,8 +553,6 @@ namespace OffsetRemover
             return pathSb.ToString();
         }
 
-        private static bool? lastAppliedShowSelf = null;
-
         private static void CheckRenderLoop(CameraKind kind)
         {
             if (!Player.HandsExist || !Player.Avatar) return;
@@ -584,12 +563,8 @@ namespace OffsetRemover
             else showSelf = false;
 
             bool cloneReady = headlessAvatarClone != null && cloneAvatarRenderers.Count > 0;
-            bool wantsSelf = showSelf || !cloneReady;
 
-            if (lastAppliedShowSelf == wantsSelf) return;
-            lastAppliedShowSelf = wantsSelf;
-
-            if (wantsSelf)
+            if (showSelf || !cloneReady)
             {
                 ToggleAvatarVisibility(selfRenderers, true);
                 if (headlessAvatarClone != null) ToggleAvatarVisibility(cloneAvatarRenderers, false);
